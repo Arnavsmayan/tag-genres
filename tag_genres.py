@@ -180,7 +180,7 @@ VIBE_TAGS = {
     ],
 }
 
-BATCH_SIZE = 5
+BATCH_SIZE = 50
 DELAY_BETWEEN_BATCHES = 1.5
 REQUEST_TIMEOUT = 60.0          # seconds per OpenAI request
 MAX_RETRIES = 3                 # attempts per batch
@@ -323,7 +323,7 @@ def get_genres_from_gpt(client: OpenAI, songs: list[dict]) -> tuple[list[list[st
         try:
             response = client.chat.completions.create(
                 model=OPENAI_MODEL,
-                max_completion_tokens=2000,
+                max_completion_tokens=3000,
                 messages=[{"role": "user", "content": prompt}],
                 timeout=REQUEST_TIMEOUT,
             )
