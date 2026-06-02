@@ -44,7 +44,15 @@ except ImportError:
 
 
 # ── API key + music folder (local-only script — hardcoded by design) ────────
-OPENAI_API_KEY = "sk-..."  # ← paste your OpenAI key here
+# OPENAI_API_KEY is imported from a sibling `key.py` (gitignored).
+# That file should contain a single line:  OPENAI_API_KEY = "sk-..."
+try:
+    from key import OPENAI_API_KEY
+except ImportError:
+    print("Missing key.py next to this script. Create it with:")
+    print('    OPENAI_API_KEY = "sk-..."')
+    sys.exit(1)
+
 OPENAI_MODEL = "gpt-5.4-mini"
 MUSIC_FOLDER = Path(r"C:\Users\arnav\Music\Music")
 
@@ -357,7 +365,7 @@ def get_genres_from_gpt(client: OpenAI, songs: list[dict]) -> tuple[list[list[st
 
 def process_folder(folder: Path, dry_run: bool = False):
     if not OPENAI_API_KEY or OPENAI_API_KEY == "sk-...":
-        print("Error: set OPENAI_API_KEY at the top of this file.")
+        print("Error: set OPENAI_API_KEY in key.py.")
         sys.exit(1)
 
     client = OpenAI(api_key=OPENAI_API_KEY)

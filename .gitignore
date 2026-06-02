@@ -1,0 +1,9 @@
+# Local secrets — never commit
+key.py
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local token-usage state (also lives in $HOME)
+.tag_genres_usage.json
