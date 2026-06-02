@@ -3,12 +3,13 @@
 tag_genres.py — Auto-fill MP3 genre tags with emotion/vibe labels using GPT.
 
 Usage:
-    python tag_genres.py /path/to/your/music/folder
+    python tag_genres.py            # tags MUSIC_FOLDER (hardcoded below)
+    python tag_genres.py --dry-run  # preview without writing files
 
 Requirements:
-    pip install mutagen openai
+    pip install mutagen openai tqdm
 
-API key is hardcoded below (local-only script).
+API key and music folder are hardcoded below (local-only script).
 
 Each song gets 2-3 emotion/vibe tags written as separate entries in the
 ID3 TCON frame. Native phone music players (iOS Music, Samsung Music) read
@@ -35,10 +36,17 @@ except ImportError:
     print("Missing dependency. Run: pip install openai")
     sys.exit(1)
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    print("Missing dependency. Run: pip install tqdm")
+    sys.exit(1)
 
-# ── API key (local-only script — hardcoded by design) ───────────────────────
+
+# ── API key + music folder (local-only script — hardcoded by design) ────────
 OPENAI_API_KEY = "sk-..."  # ← paste your OpenAI key here
 OPENAI_MODEL = "gpt-5.4-mini"
+MUSIC_FOLDER = Path(r"C:\Users\arnav\Music\Music")
 
 
 # ── Daily token budget ───────────────────────────────────────────────────────
@@ -387,54 +395,61 @@ def process_folder(folder: Path, dry_run: bool = False):
         print(f"Already at/near daily limit ({tokens_today:,} ≥ {budget_cap:,}). Try again after UTC midnight.")
         return
 
-    for batch_start in range(0, total, BATCH_SIZE):
-        batch         = songs[batch_start : batch_start + BATCH_SIZE]
-        batch_num     = batch_start // BATCH_SIZE + 1
-        total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
+    pbar = tqdm(total=total, desc="Tagging", unit="song", dynamic_ncols=True)
+    try:
+        for batch_start in range(0, total, BATCH_SIZE):
+            batch         = songs[batch_start : batch_start + BATCH_SIZE]
+            batch_num     = batch_start // BATCH_SIZE + 1
+            total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
 
-        # Pre-flight budget check: use observed average if we have data, else a safe estimate.
-        batches_done = batch_num - 1
-        avg_per_batch = (tokens_this_run / batches_done) if batches_done else ESTIMATED_TOKENS_PER_BATCH
-        if tokens_today + avg_per_batch > budget_cap:
-            remaining_songs = total - batch_start
-            print(
-                f"Stopping: next batch (~{int(avg_per_batch):,} tokens) would exceed "
-                f"daily limit ({tokens_today:,}/{budget_cap:,}). "
-                f"{remaining_songs} song(s) deferred to next run."
-            )
-            skipped += remaining_songs
-            break
+            # Pre-flight budget check: use observed average if we have data, else a safe estimate.
+            batches_done = batch_num - 1
+            avg_per_batch = (tokens_this_run / batches_done) if batches_done else ESTIMATED_TOKENS_PER_BATCH
+            if tokens_today + avg_per_batch > budget_cap:
+                remaining_songs = total - batch_start
+                tqdm.write(
+                    f"Stopping: next batch (~{int(avg_per_batch):,} tokens) would exceed "
+                    f"daily limit ({tokens_today:,}/{budget_cap:,}). "
+                    f"{remaining_songs} song(s) deferred to next run."
+                )
+                skipped += remaining_songs
+                break
 
-        print(f"Batch {batch_num}/{total_batches}  ({len(batch)} songs)...")
+            tqdm.write(f"Batch {batch_num}/{total_batches}  ({len(batch)} songs)...")
 
-        try:
-            all_genres, batch_tokens = get_genres_from_gpt(client, batch)
-        except (APIError, RuntimeError) as e:
-            print(f"  ✗ batch {batch_num} failed: {e}")
-            skipped += len(batch)
-            continue
-
-        tokens_today += batch_tokens
-        tokens_this_run += batch_tokens
-        # Always persist — dry-run still spends real tokens against the daily cap.
-        save_today_usage(tokens_today)
-
-        for song, genres in zip(batch, all_genres):
-            if not genres:
-                print(f"  ✗  {song['filename'][:55]:<55}  →  no valid tags returned, skipped")
-                skipped += 1
+            try:
+                all_genres, batch_tokens = get_genres_from_gpt(client, batch)
+            except (APIError, RuntimeError) as e:
+                tqdm.write(f"  ✗ batch {batch_num} failed: {e}")
+                skipped += len(batch)
+                pbar.update(len(batch))
                 continue
-            if not dry_run:
-                write_genres(song["path"], genres)
-            tag_str = "  /  ".join(genres)
-            marker = "·" if dry_run else "✓"
-            print(f"  {marker}  {song['filename'][:55]:<55}  →  {tag_str}")
-            processed += 1
 
-        print(f"  ↳ batch tokens: {batch_tokens:,}  |  today: {tokens_today:,}/{DAILY_TOKEN_LIMIT:,}")
+            tokens_today += batch_tokens
+            tokens_this_run += batch_tokens
+            # Always persist — dry-run still spends real tokens against the daily cap.
+            save_today_usage(tokens_today)
 
-        if batch_start + BATCH_SIZE < total:
-            time.sleep(DELAY_BETWEEN_BATCHES)
+            for song, genres in zip(batch, all_genres):
+                if not genres:
+                    tqdm.write(f"  ✗  {song['filename'][:55]:<55}  →  no valid tags returned, skipped")
+                    skipped += 1
+                    pbar.update(1)
+                    continue
+                if not dry_run:
+                    write_genres(song["path"], genres)
+                tag_str = "  /  ".join(genres)
+                marker = "·" if dry_run else "✓"
+                tqdm.write(f"  {marker}  {song['filename'][:55]:<55}  →  {tag_str}")
+                processed += 1
+                pbar.update(1)
+
+            tqdm.write(f"  ↳ batch tokens: {batch_tokens:,}  |  today: {tokens_today:,}/{DAILY_TOKEN_LIMIT:,}")
+
+            if batch_start + BATCH_SIZE < total:
+                time.sleep(DELAY_BETWEEN_BATCHES)
+    finally:
+        pbar.close()
 
     verb = "would tag" if dry_run else "tagged"
     print(
@@ -445,14 +460,12 @@ def process_folder(folder: Path, dry_run: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Auto-tag MP3 files with vibe/emotion genres via GPT.")
-    parser.add_argument("folder", help="Path to a folder of .mp3 files (searched recursively).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be tagged without modifying any files.")
     args = parser.parse_args()
 
-    folder = Path(args.folder)
-    if not folder.is_dir():
-        print(f"Not a directory: {folder}")
+    if not MUSIC_FOLDER.is_dir():
+        print(f"Not a directory: {MUSIC_FOLDER}")
         sys.exit(1)
 
-    process_folder(folder, dry_run=args.dry_run)
+    process_folder(MUSIC_FOLDER, dry_run=args.dry_run)
