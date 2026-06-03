@@ -88,95 +88,41 @@ def save_today_usage(tokens: int) -> None:
 
 
 # ── Vibe palette ─────────────────────────────────────────────────────────────
-# Pure emotion/energy — how a song FEELS, not where you'd play it.
-# GPT picks 2-3 per song. Each tag becomes a separate genre in the MP3.
+# Compact, language-prefixed vibes. GPT picks 1-3 per song.
+# Each tag becomes a separate genre entry in the MP3.
 #
-# Energy spectrum so similar vibes cluster when sorted alphabetically:
-#   Acoustic Feels · Chill · Mellow  →  Feel Good · Upbeat  →  Hype · Party Banger
-#
-# ALL tags are in English regardless of song language (so Korean
-# songs show English tags — easier to sort on any phone).
+# English: 1 energy tag (party/feelgood/slow) + optional era tag (modern/oldschool)
+#          modern  = Bieber, Sheeran, Mendes, Taylor, Drake-era (≈2010+)
+#          oldschool = BSB, MJ, Bryan Adams, 90s/early-2000s
+# Hindi:   pick 1-3 tags freely from the Hindi list (no era axis)
+# Kpop:    1 energy tag + optional flag(s): bts, girlgroup, english
+#          english = Korean artist singing fully in English (e.g. Jungkook "Yes or No")
 
 VIBE_TAGS = {
     "English": [
-        # High energy
-        "Party Banger",
-        "Hype Track",
-        "Dance Hit",
-        "Summer Energy",
-        "Upbeat Pop",
-        # Mid / positive
-        "Feel Good",
-        "Carefree Bop",
-        "Confident Pop",
-        "Indie Vibes",
-        # Romantic / emotional
-        "Romantic",
-        "Soft Love Song",
-        "Heartbreak",
-        "Emotional",
-        # Chill / slow
-        "Chill Pop",
-        "Mellow",
-        "Late Night Chill",
-        "Acoustic Feels",
-        # Era (use when the era IS the identity of the song)
-        "2000s Throwback",
-        "Chill 2010s",
-        "2020s Pop",
-        "90s Oldie",           # only for actual 90s songs
-        # Artist-era vibes
-        "Backstreet Era",      # BSB / early 2000s boyband
-        "Bieber Era",
-        "Shawn Mendes Soft",
-        "Ed Sheeran Acoustic",
-        "Taylor Swift Pop",
-        "R&B Smooth",
-        "Hip-Hop Energy",
+        "english-party",
+        "english-feelgood",
+        "english-slow",
+        "english-modern",      # era flag — combine with party/feelgood/slow
+        "english-oldschool",   # era flag — combine with party/feelgood/slow
     ],
 
     "Hindi": [
-        # High energy
-        "Party Banger",
-        "Desi Hype",
-        "Punjabi Energy",
-        "Item Track",
-        "Sangeet Hit",
-        # Romantic / emotional
-        "Bollywood Romantic",
-        "Heartbreak Hindi",
-        "Sufi Feel",
-        "Emotional Arijit",    # slow emotional Bollywood / Arijit sound
-        # Chill / nostalgic
-        "Chill Bollywood",
-        "Late Night Hindi",
-        "Filmi Nostalgia",
-        # Era
-        "2000s Bollywood",
-        "2010s Bollywood",
-        "2020s Hindi Pop",
-        "90s Bollywood",       # only for actual 90s songs
-        # Artist-era
-        "AR Rahman Classic",
-        "Pritam Feels",
-        "Badshah Energy",
-        "Atif Aslam Soft",
+        "hindi-party",             # regular Bollywood party
+        "hindi-punjabi-party",     # Punjabi-flavored bangers
+        "hindi-upbeat",            # non-party upbeat / feel-good high energy
+        "hindi-roadtrip",          # mid-tempo journey vibe (Hum Jo Chalne Lage, Ve Haaniya)
+        "hindi-rainy-acoustic",    # soft acoustic monsoon-mood (Iktara, Kabhi Kabhi Aditi)
+        "hindi-slow-romantic",     # slow romantic ballads (Tum Hi Ho, Tum Se Hi)
+        "hindi-heartbreak",        # sad / breakup / longing (Channa Mereya, Agar Tum Saath Ho)
     ],
 
     "Korean": [
-        # Intentionally small — library is 90% BTS
-        # BTS specific
-        "BTS Hype",
-        "BTS Upbeat",
-        "BTS Slow",
-        "BTS Emotional",
-        # Generic K-Pop for non-BTS
-        "K-Pop Upbeat",
-        "K-Pop Slow",
-        "K-Drama OST",
-        "K-Pop Girl Group",
-        # Korean artist singing fully in English (e.g. Jungkook - Yes or No)
-        "K-Artist English",
+        "kpop-upbeat",      # high-energy K-pop
+        "kpop-slow",        # ballad / slow K-pop
+        "kpop-bts",         # flag — apply on top of upbeat/slow when it's BTS
+        "kpop-girlgroup",   # flag — apply on top of upbeat/slow for girl groups
+        "kpop-english",     # Korean artist singing fully in English
     ],
 }
 
@@ -234,9 +180,9 @@ def write_genres(mp3_path: Path, genres: list[str]):
 
 
 def build_prompt(songs: list[dict]) -> str:
-    eng  = "\n".join(f"    - {t}" for t in VIBE_TAGS["English"])
-    hin  = "\n".join(f"    - {t}" for t in VIBE_TAGS["Hindi"])
-    kor  = "\n".join(f"    - {t}" for t in VIBE_TAGS["Korean"])
+    eng = "\n".join(f"    - {t}" for t in VIBE_TAGS["English"])
+    hin = "\n".join(f"    - {t}" for t in VIBE_TAGS["Hindi"])
+    kor = "\n".join(f"    - {t}" for t in VIBE_TAGS["Korean"])
 
     songs_str = "\n".join(
         f'{i+1}. {s["filename"]}'
@@ -245,12 +191,12 @@ def build_prompt(songs: list[dict]) -> str:
 
     return f"""You are a music tagger for a multilingual library (English, Hindi, Korean).
 
-For each song assign exactly 2 or 3 vibe tags that capture the song's EMOTION and ENERGY.
-Focus on how the song feels — not where you'd play it.
+For each song, assign 1 to 3 vibe tags that capture how the song FEELS
+(emotion + energy), not where you'd play it.
 
 Step 1: Parse the filename to figure out song name, artist(s), and movie/album if present.
-         Then detect the language — English, Hindi, or Korean.
-Step 2: Pick 2-3 tags strictly from the matching list below.
+         Then detect the language: English, Hindi, or Korean.
+Step 2: Pick 1-3 tags strictly from the matching list below.
 
 English tags:
 {eng}
@@ -258,17 +204,53 @@ English tags:
 Hindi tags:
 {hin}
 
-Korean tags:
+Korean (kpop) tags:
 {kor}
 
+How to combine tags within each language:
+
+ENGLISH — pick 1 energy tag + (optionally) 1 era tag.
+  Energy: english-party | english-feelgood | english-slow
+  Era flag (optional): english-modern (Bieber, Sheeran, Mendes, Taylor, Drake-era ≈2010+)
+                       english-oldschool (BSB, MJ, Bryan Adams, 90s/early-2000s)
+  Examples:
+    "I Want It That Way - Backstreet Boys" → ["english-slow", "english-oldschool"]
+    "Shape of You - Ed Sheeran"           → ["english-feelgood", "english-modern"]
+    "Macarena"                            → ["english-party", "english-oldschool"]
+    "Blinding Lights - The Weeknd"        → ["english-feelgood", "english-modern"]
+
+HINDI — pick 1-3 tags freely from the Hindi list. No era axis.
+  Hindi-slow-romantic = slow romantic ballads (Tum Hi Ho).
+  Hindi-heartbreak    = sad / breakup / longing (Channa Mereya, Agar Tum Saath Ho).
+                        Use heartbreak instead of slow-romantic when the song's
+                        core emotion is sadness, not love.
+  Hindi-roadtrip      = mid-tempo journey vibe (Hum Jo Chalne Lage, Ve Haaniya).
+  Hindi-rainy-acoustic = soft acoustic monsoon mood (Iktara, Kabhi Kabhi Aditi).
+  Hindi-upbeat        = high energy that ISN'T party (Ilahi, Nashe Si Chadh Gayi).
+  Examples:
+    "Tum Hi Ho - Arijit Singh"        → ["hindi-slow-romantic"]
+    "Channa Mereya - Arijit Singh"    → ["hindi-heartbreak"]
+    "Lamberghini - The Doorbeen"      → ["hindi-punjabi-party"]
+    "Ilahi - Yeh Jawaani Hai Deewani" → ["hindi-upbeat", "hindi-roadtrip"]
+    "Iktara - Wake Up Sid"            → ["hindi-rainy-acoustic", "hindi-slow-romantic"]
+
+KPOP — pick 1 energy tag + optional flag(s) (bts, girlgroup, english).
+  Energy: kpop-upbeat | kpop-slow
+  Flags (optional, can combine):
+    kpop-bts       — song is by BTS or a BTS member
+    kpop-girlgroup — song is by a K-pop girl group (BLACKPINK, NewJeans, ITZY, etc.)
+    kpop-english   — Korean artist singing fully in English
+  Examples:
+    "Dynamite - BTS"           → ["kpop-upbeat", "kpop-bts", "kpop-english"]
+    "Spring Day - BTS"         → ["kpop-slow", "kpop-bts"]
+    "How You Like That - BLACKPINK" → ["kpop-upbeat", "kpop-girlgroup"]
+    "Yes or No - Jungkook"     → ["kpop-upbeat", "kpop-bts", "kpop-english"]
+
 Rules:
-- Exactly 2 or 3 tags. Never 1, never 4.
+- 1 to 3 tags per song. Never more than 3.
 - Only use tags from the correct language list. No inventing new tags.
-- "90s Oldie" / "90s Bollywood" only for songs genuinely from the 1990s.
-- Artist-era tags only if the song truly fits that artist's sound.
-- High-energy songs → energy tags. Slow/sad songs → emotional/chill tags.
-- "Party Banger" appears in both English and Hindi lists — fine to use for either.
-- Return ONLY a JSON array where each element is an array of 2-3 tag strings.
+- Tag names must match EXACTLY (lowercase, hyphenated, as listed).
+- Return ONLY a JSON array where each element is an array of 1-3 tag strings.
   Same order as input songs. No explanation, no markdown.
 
 Song filenames (raw — parse them yourself):
@@ -276,17 +258,17 @@ Song filenames (raw — parse them yourself):
 
 Example output for 5 filenames (English, Hindi, Korean, Hindi, English):
 [
-  ["Upbeat Pop", "Feel Good", "Chill 2010s"],
-  ["Heartbreak Hindi", "Emotional Arijit", "Late Night Hindi"],
-  ["BTS Hype", "BTS Upbeat"],
-  ["Party Banger", "Punjabi Energy", "Sangeet Hit"],
-  ["Acoustic Feels", "Romantic", "Shawn Mendes Soft"]
+  ["english-feelgood", "english-modern"],
+  ["hindi-heartbreak"],
+  ["kpop-upbeat", "kpop-bts"],
+  ["hindi-punjabi-party"],
+  ["english-slow", "english-oldschool"]
 ]
 """
 
 
 def _validate_tags(entry, lineno: int) -> list[str]:
-    """Coerce one model output into a clean list of 2-3 known tags.
+    """Coerce one model output into a clean list of 1-3 known tags.
     Drops anything not in ALL_VIBE_TAGS (no hallucinated genres written to disk)."""
     if isinstance(entry, str):
         candidates = [entry]
@@ -305,7 +287,7 @@ def _validate_tags(entry, lineno: int) -> list[str]:
             deduped.append(t)
     deduped = deduped[:3]
 
-    if len(deduped) < 2:
+    if not deduped:
         dropped = [t for t in candidates if t not in ALL_VIBE_TAGS]
         if dropped:
             print(f"  ⚠  song #{lineno}: dropped invalid tags {dropped}")
