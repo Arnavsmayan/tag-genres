@@ -92,9 +92,11 @@ def save_today_usage(tokens: int) -> None:
 # Each tag becomes a separate genre entry in the MP3.
 #
 # English: 1 energy tag (party/feelgood/slow) + optional era tag (modern/oldschool)
+#          + optional gym flag (energy-gym for workout/motivational tracks)
 #          modern  = Bieber, Sheeran, Mendes, Taylor, Drake-era (≈2010+)
 #          oldschool = BSB, MJ, Bryan Adams, 90s/early-2000s
 # Hindi:   pick 1-3 tags freely from the Hindi list (no era axis)
+#          + optional gym flag (energy-gym for workout/motivational tracks)
 # Kpop:    1 energy tag + optional flag(s): bts, girlgroup, english
 #          english = Korean artist singing fully in English (e.g. Jungkook "Yes or No")
 
@@ -103,8 +105,9 @@ VIBE_TAGS = {
         "english-party",
         "english-feelgood",
         "english-slow",
-        "english-modern",      # era flag — combine with party/feelgood/slow
-        "english-oldschool",   # era flag — combine with party/feelgood/slow
+        "english-modern",       # era flag — combine with party/feelgood/slow
+        "english-oldschool",    # era flag — combine with party/feelgood/slow
+        "english-energy-gym",   # flag — workout / motivational (Remember the Name, Eye of the Tiger)
     ],
 
     "Hindi": [
@@ -115,6 +118,7 @@ VIBE_TAGS = {
         "hindi-rainy-acoustic",    # soft acoustic monsoon-mood (Iktara, Kabhi Kabhi Aditi)
         "hindi-slow-romantic",     # slow romantic ballads (Tum Hi Ho, Tum Se Hi)
         "hindi-heartbreak",        # sad / breakup / longing (Channa Mereya, Agar Tum Saath Ho)
+        "hindi-energy-gym",        # flag — workout / motivational (Bhaag Milkha Bhaag, Sultan)
     ],
 
     "Korean": [
@@ -209,15 +213,19 @@ Korean (kpop) tags:
 
 How to combine tags within each language:
 
-ENGLISH — pick 1 energy tag + (optionally) 1 era tag.
+ENGLISH — pick 1 energy tag + (optionally) 1 era tag + (optionally) the gym flag.
   Energy: english-party | english-feelgood | english-slow
   Era flag (optional): english-modern (Bieber, Sheeran, Mendes, Taylor, Drake-era ≈2010+)
                        english-oldschool (BSB, MJ, Bryan Adams, 90s/early-2000s)
+  Gym flag (optional): english-energy-gym — workout/motivational (Remember the Name,
+                       Eye of the Tiger, Stronger). Add on TOP of the energy tag.
   Examples:
     "I Want It That Way - Backstreet Boys" → ["english-slow", "english-oldschool"]
     "Shape of You - Ed Sheeran"           → ["english-feelgood", "english-modern"]
     "Macarena"                            → ["english-party", "english-oldschool"]
     "Blinding Lights - The Weeknd"        → ["english-feelgood", "english-modern"]
+    "Remember the Name - Fort Minor"      → ["english-party", "english-energy-gym"]
+    "Eye of the Tiger - Survivor"         → ["english-party", "english-oldschool", "english-energy-gym"]
 
 HINDI — pick 1-3 tags freely from the Hindi list. No era axis.
   Hindi-slow-romantic = slow romantic ballads (Tum Hi Ho).
@@ -227,12 +235,15 @@ HINDI — pick 1-3 tags freely from the Hindi list. No era axis.
   Hindi-roadtrip      = mid-tempo journey vibe (Hum Jo Chalne Lage, Ve Haaniya).
   Hindi-rainy-acoustic = soft acoustic monsoon mood (Iktara, Kabhi Kabhi Aditi).
   Hindi-upbeat        = high energy that ISN'T party (Ilahi, Nashe Si Chadh Gayi).
+  Hindi-energy-gym    = workout/motivational (Bhaag Milkha Bhaag, Sultan, Zinda).
+                        Add on TOP of the energy tag (usually with hindi-upbeat).
   Examples:
     "Tum Hi Ho - Arijit Singh"        → ["hindi-slow-romantic"]
     "Channa Mereya - Arijit Singh"    → ["hindi-heartbreak"]
     "Lamberghini - The Doorbeen"      → ["hindi-punjabi-party"]
     "Ilahi - Yeh Jawaani Hai Deewani" → ["hindi-upbeat", "hindi-roadtrip"]
     "Iktara - Wake Up Sid"            → ["hindi-rainy-acoustic", "hindi-slow-romantic"]
+    "Bhaag Milkha Bhaag - title"      → ["hindi-upbeat", "hindi-energy-gym"]
 
 KPOP — pick 1 energy tag + optional flag(s) (bts, girlgroup, english).
   Energy: kpop-upbeat | kpop-slow
