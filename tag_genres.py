@@ -130,7 +130,7 @@ VIBE_TAGS = {
     ],
 }
 
-BATCH_SIZE = 50
+BATCH_SIZE = 20
 DELAY_BETWEEN_BATCHES = 1.5
 REQUEST_TIMEOUT = 60.0          # seconds per OpenAI request
 MAX_RETRIES = 3                 # attempts per batch
@@ -259,37 +259,70 @@ KPOP — pick 1 energy tag + optional flag(s) (bts, girlgroup, english).
 
 Rules:
 - 1 to 3 tags per song. Never more than 3.
-- Only use tags from the correct language list. No inventing new tags.
+- Tags must come from the chosen language's list. No mixing languages.
 - Tag names must match EXACTLY (lowercase, hyphenated, as listed).
-- Return ONLY a JSON array where each element is an array of 1-3 tag strings.
-  Same order as input songs. No explanation, no markdown.
 
-Song filenames (raw — parse them yourself):
+Output: return ONLY a JSON array, one object per input song, in the SAME ORDER.
+Each object has the shape:
+  {{"index": <1-based int matching the input number>,
+   "filename": "<echo the input filename verbatim>",
+   "language": "English" | "Hindi" | "Korean",
+   "tags": ["...", ...]}}
+Echo the filename exactly so we can verify alignment. No explanation, no markdown.
+
+Song filenames (numbered — preserve this order in your output):
 {songs_str}
 
-Example output for 5 filenames (English, Hindi, Korean, Hindi, English):
+Example output for 5 filenames:
 [
-  ["english-feelgood", "english-modern"],
-  ["hindi-heartbreak"],
-  ["kpop-upbeat", "kpop-bts"],
-  ["hindi-punjabi-party"],
-  ["english-slow", "english-oldschool"]
+  {{"index": 1, "filename": "Shape of You - Ed Sheeran", "language": "English", "tags": ["english-feelgood", "english-modern"]}},
+  {{"index": 2, "filename": "Channa Mereya - Arijit Singh", "language": "Hindi", "tags": ["hindi-heartbreak"]}},
+  {{"index": 3, "filename": "Dynamite - BTS", "language": "Korean", "tags": ["kpop-upbeat", "kpop-bts", "kpop-english"]}},
+  {{"index": 4, "filename": "Lamberghini - The Doorbeen", "language": "Hindi", "tags": ["hindi-punjabi-party"]}},
+  {{"index": 5, "filename": "I Want It That Way - Backstreet Boys", "language": "English", "tags": ["english-slow", "english-oldschool"]}}
 ]
 """
 
 
-def _validate_tags(entry, lineno: int) -> list[str]:
-    """Coerce one model output into a clean list of 1-3 known tags.
-    Drops anything not in ALL_VIBE_TAGS (no hallucinated genres written to disk)."""
-    if isinstance(entry, str):
-        candidates = [entry]
-    elif isinstance(entry, list):
-        candidates = [str(t).strip() for t in entry]
-    else:
-        candidates = []
+def _validate_tags(entry, lineno: int, expected_filename: str) -> list[str]:
+    """Validate one per-song response object and return its clean tag list.
 
-    valid = [t for t in candidates if t in ALL_VIBE_TAGS]
-    # de-dupe while keeping order, cap at 3
+    Returns [] (skip song — no tags will be written) if any of:
+      - entry isn't an object
+      - index doesn't match the input position (alignment broken)
+      - filename echo strongly disagrees with the input (alignment broken)
+      - language isn't one of English/Hindi/Korean
+      - none of the returned tags belong to that language's palette
+
+    Tags are also de-duped and capped at 3."""
+    if not isinstance(entry, dict):
+        print(f"  ⚠  song #{lineno}: response is not an object, skipped")
+        return []
+
+    idx = entry.get("index")
+    if idx != lineno:
+        print(f"  ⚠  song #{lineno}: index mismatch (got {idx!r}), skipped")
+        return []
+
+    echoed = str(entry.get("filename", "")).strip()
+    if echoed and echoed.lower() != expected_filename.lower():
+        print(f"  ⚠  song #{lineno}: filename mismatch (got {echoed!r}, expected {expected_filename!r}), skipped")
+        return []
+
+    lang = entry.get("language")
+    if lang not in VIBE_TAGS:
+        print(f"  ⚠  song #{lineno}: unknown/missing language {lang!r}, skipped")
+        return []
+
+    raw_tags = entry.get("tags", [])
+    if not isinstance(raw_tags, list):
+        print(f"  ⚠  song #{lineno}: tags field is not a list, skipped")
+        return []
+    candidates = [str(t).strip() for t in raw_tags]
+
+    allowed = set(VIBE_TAGS[lang])
+    valid = [t for t in candidates if t in allowed]
+
     seen = set()
     deduped = []
     for t in valid:
@@ -299,9 +332,12 @@ def _validate_tags(entry, lineno: int) -> list[str]:
     deduped = deduped[:3]
 
     if not deduped:
-        dropped = [t for t in candidates if t not in ALL_VIBE_TAGS]
-        if dropped:
-            print(f"  ⚠  song #{lineno}: dropped invalid tags {dropped}")
+        wrong_lang = [t for t in candidates if t in ALL_VIBE_TAGS and t not in allowed]
+        unknown = [t for t in candidates if t not in ALL_VIBE_TAGS]
+        if wrong_lang:
+            print(f"  ⚠  song #{lineno}: dropped wrong-language tags {wrong_lang} (model said language={lang})")
+        if unknown:
+            print(f"  ⚠  song #{lineno}: dropped invalid tags {unknown}")
     return deduped
 
 
@@ -310,19 +346,30 @@ def get_genres_from_gpt(client: OpenAI, songs: list[dict]) -> tuple[list[list[st
     Returns (tags-per-song, tokens-used-this-call).
     Raises RuntimeError on permanent failure."""
     prompt = build_prompt(songs)
+    # Per-song echo schema needs more output room than the old flat array.
+    # ~120 tokens/song covers a long filename + index + language + 3 tags with slack.
+    max_out = max(2000, len(songs) * 120)
 
     last_err: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = client.chat.completions.create(
                 model=OPENAI_MODEL,
-                max_completion_tokens=3000,
+                max_completion_tokens=max_out,
                 messages=[{"role": "user", "content": prompt}],
                 timeout=REQUEST_TIMEOUT,
             )
             if not response.choices or response.choices[0].message.content is None:
                 raise RuntimeError("empty response from model")
-            raw = response.choices[0].message.content.strip()
+            choice = response.choices[0]
+            if choice.finish_reason != "stop":
+                # Truncated output → JSON may be parseable but partial, silently
+                # misaligning later songs. Treat as a hard failure.
+                raise RuntimeError(
+                    f"model output truncated (finish_reason={choice.finish_reason}); "
+                    f"raise max_completion_tokens or shrink BATCH_SIZE"
+                )
+            raw = choice.message.content.strip()
 
             tokens_used = response.usage.total_tokens if response.usage else 0
 
@@ -340,7 +387,10 @@ def get_genres_from_gpt(client: OpenAI, songs: list[dict]) -> tuple[list[list[st
             if not isinstance(result, list) or len(result) != len(songs):
                 raise RuntimeError(f"got {len(result) if isinstance(result, list) else 'non-list'} entries for {len(songs)} songs")
 
-            return [_validate_tags(entry, i + 1) for i, entry in enumerate(result)], tokens_used
+            return [
+                _validate_tags(entry, i + 1, songs[i]["filename"])
+                for i, entry in enumerate(result)
+            ], tokens_used
 
         except (APITimeoutError, RateLimitError, APIError) as e:
             last_err = e
